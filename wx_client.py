@@ -339,8 +339,8 @@ class WXClient(object):
         }
         self.client_contact = json.loads(
             self.s.get(url, params=params, headers=request_headers, timeout=REQUESTS_TIME_OUT).content)
-        print('web_wx_get_contact')
-        print(json.dumps(self.client_contact, indent=4, ensure_ascii=False))
+        # print('web_wx_get_contact')
+        # print(json.dumps(self.client_contact, indent=4, ensure_ascii=False))
 
     def web_wx_batch_get_contact(self):
         """
@@ -375,8 +375,8 @@ class WXClient(object):
         # print(payload)
         self.client_group_contact = json.loads(
             self.s.post(url, json=payload, headers=request_headers, timeout=REQUESTS_TIME_OUT).content)
-        print('web_wx_batch_get_contact')
-        print(json.dumps(self.client_group_contact, indent=4, ensure_ascii=False))
+        # print('web_wx_batch_get_contact')
+        # print(json.dumps(self.client_group_contact, indent=4, ensure_ascii=False))
 
     def sync_check(self):
         """
@@ -558,7 +558,7 @@ class WXClient(object):
 
             # 微信分享/推送
             elif msg_type == 49:
-                print(msg)
+                # print(msg)
                 app_msg_type = {5: '链接', 3: '音乐', 7: '微博', 33: '小程序'}.get(msg['AppMsgType'], '-')
 
                 # 群组消息 - 接收
