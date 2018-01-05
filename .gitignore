@@ -1,0 +1,10 @@
+# Created by .ignore support plugin (hsz.mobi)
+
+
+.idea/
+wx_qq_com.env/
+
+*.pyc
+*.pyo
+
+qrcode.jpg
