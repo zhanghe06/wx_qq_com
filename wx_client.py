@@ -510,6 +510,7 @@ class WXClient(object):
             from_user_name = msg['FromUserName']
             to_user_name = msg['ToUserName']
             msg_type = msg['MsgType']
+            sub_msg_type = msg['SubMsgType']
             status = msg['Status']
             content = html_parser.unescape(msg['Content'])
             create_time = msg['CreateTime']
@@ -528,6 +529,50 @@ class WXClient(object):
                 47: '表情',
                 62: '视频',
             }
+            # 位置信息
+            if msg_type == 1 and sub_msg_type == 48:
+                # 群组消息 - 接收
+                if from_user_name.startswith('@@') and ':<br/>' in content:
+                    to_user_name = content.split(':<br/>', 1)[0]
+                    group_info, member_info = self.get_group_member(from_user_name, to_user_name)
+                    content = content.split(':<br/>', 1)[1]
+                    contents = [
+                        format_info('消息编号', msg_id),
+                        format_info('消息类型', msg_type_map[msg_type]),
+                        format_info('消息来源', group_info),
+                        format_info('消息来自', member_info),
+                        format_info('消息内容', content, False),
+                        format_info('消息时间', self._format_time(create_time)),
+                    ]
+                    print_info(contents, '群组消息 - 接收')
+
+                # 群组消息 - 发送
+                elif to_user_name.startswith('@@'):
+                    group_info, member_info = self.get_group_member(to_user_name, from_user_name)
+                    contents = [
+                        format_info('消息编号', msg_id),
+                        format_info('消息类型', msg_type_map[msg_type]),
+                        format_info('消息来源', group_info),
+                        format_info('消息来自', member_info),
+                        format_info('消息内容', content, False),
+                        format_info('消息时间', self._format_time(create_time)),
+                    ]
+                    print_info(contents, '群组消息 - 发送')
+
+                # 个人消息
+                else:
+                    from_user_name_info = self.get_contact_member(from_user_name)
+                    to_user_name_info = self.get_contact_member(to_user_name)
+                    contents = [
+                        format_info('消息编号', msg_id),
+                        format_info('消息类型', msg_type_map[msg_type]),
+                        format_info('消息来自', from_user_name_info),
+                        format_info('消息发至', to_user_name_info),
+                        format_info('消息内容', content, False),
+                        format_info('消息时间', self._format_time(create_time)),
+                    ]
+                    status_msg = '接收' if self.client_info['User']['NickName'] == to_user_name_info else '发送'
+                    print_info(contents, '个人消息 - %s' % status_msg)
             if msg_type in msg_type_map:
                 # 群组消息 - 接收
                 if from_user_name.startswith('@@') and ':<br/>' in content:
@@ -718,7 +763,7 @@ class WXClient(object):
                             # msg_content['msg']['appmsg']['sourcedisplayname'],
                             # msg_content['msg']['appmsg']['sourceusername'],
                             msg_content['msg']['appinfo']['appname'] or msg_content['msg']['appmsg']['sourceusername'],
-                            msg_content['msg']['fromusername'],
+                            msg_content['msg']['fromusername'] or '公号推送',
                         ),
                     ])
 
@@ -939,9 +984,9 @@ class WXClient(object):
         for member_item in self.client_contact['MemberList']:
             if member_code == member_item['UserName']:
                 member_nick_name = member_item['NickName']
-                member_display_name = member_item['DisplayName']
+                member_remark_name = member_item['RemarkName']
                 member_info = '%s [%s]' % (
-                    member_nick_name, member_display_name) if member_display_name else member_nick_name
+                    member_nick_name, member_remark_name) if member_remark_name else member_nick_name
                 return member_info
         user_info = self.client_info['User']
         return user_info['NickName'] if member_code == user_info['UserName'] else '-'
@@ -1005,5 +1050,5 @@ class WXClient(object):
 
 
 if __name__ == '__main__':
-    wx_client = WXClient()
+    wx_client = WXClient(debug=True)
     wx_client.run()
