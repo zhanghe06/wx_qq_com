@@ -9,3 +9,8 @@ wx_qq_com.env/
 
 qrcode.jpg
 contacts/*
+
+
+.coverage
+htmlcov/
+.coveralls.yml
