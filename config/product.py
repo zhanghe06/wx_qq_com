@@ -11,7 +11,7 @@
 
 import os
 
-BASE_DIR = os.path.abspath(os.path.dirname(__file__)+'/../')
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 
 # requests 超时设置
 REQUESTS_TIME_OUT = (30, 30)

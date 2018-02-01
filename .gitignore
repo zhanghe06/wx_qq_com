@@ -8,3 +8,4 @@ wx_qq_com.env/
 *.pyo
 
 qrcode.jpg
+contacts/*

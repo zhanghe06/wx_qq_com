@@ -20,13 +20,13 @@ import time
 from HTMLParser import HTMLParser
 from functools import wraps
 
-import requests
 import xmltodict
 
 from config import current_config
 from tools.format import format_info, print_info, output_line
 from tools.session import session_obj
 
+BASE_DIR = current_config.BASE_DIR
 REQUESTS_TIME_OUT = current_config.REQUESTS_TIME_OUT
 
 html_parser = HTMLParser()
@@ -45,8 +45,6 @@ def catch_keyboard_interrupt(func):
 
 class WXClient(object):
     cookies = {}
-
-    s = requests.session()
 
     headers = {
         # 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.13; rv:57.0) Gecko/20100101 Firefox/57.0'
@@ -73,13 +71,15 @@ class WXClient(object):
     client_info = {}
     client_contact = {}
     client_group_contact = {}
+    client_group_tmp_contact = {}
 
     login_user_nick_name = ''
     login_user_sex = 0
 
     sync_host = 'webpush.wx.qq.com'
 
-    def __init__(self):
+    def __init__(self, debug=False):
+        self.debug = debug
         self.s = session_obj
         self.device_id = self._get_device_id()
 
@@ -285,8 +285,10 @@ class WXClient(object):
         }
 
         self.client_info = json.loads(self.s.post(url, headers=request_headers, json=payload).content)
-        print('web_wx_init')
-        print(json.dumps(self.client_info, indent=4, ensure_ascii=False))
+        # print('web_wx_init')
+        # print(json.dumps(self.client_info, indent=4, ensure_ascii=False))
+        with open(os.path.join(BASE_DIR, 'contacts/client_info.json'), b'wb') as f:
+            f.write(json.dumps(self.client_info, indent=4))
 
         self.SyncKey = self.client_info['SyncKey']
         self.synckey = '|'.join(['%s_%s' % (i['Key'], i['Val']) for i in self.client_info['SyncKey']['List']])
@@ -341,8 +343,10 @@ class WXClient(object):
             self.s.get(url, params=params, headers=request_headers, timeout=REQUESTS_TIME_OUT).content)
         # print('web_wx_get_contact')
         # print(json.dumps(self.client_contact, indent=4, ensure_ascii=False))
+        with open(os.path.join(BASE_DIR, 'contacts/client_contact.json'), b'wb') as f:
+            f.write(json.dumps(self.client_contact, indent=4))
 
-    def web_wx_batch_get_contact(self):
+    def web_wx_get_group_contact(self):
         """
         批量获取扩展联系方式（适用获取群员信息）
         注意:
@@ -371,12 +375,82 @@ class WXClient(object):
             'Count': len(group_list),
             'List': group_list
         }
-        # print('web_wx_batch_get_contact payload:')
+        # print('web_wx_get_group_contact payload:')
         # print(payload)
         self.client_group_contact = json.loads(
             self.s.post(url, json=payload, headers=request_headers, timeout=REQUESTS_TIME_OUT).content)
-        # print('web_wx_batch_get_contact')
+        # print('web_wx_get_group_contact')
         # print(json.dumps(self.client_group_contact, indent=4, ensure_ascii=False))
+        with open(os.path.join(BASE_DIR, 'contacts/client_group_contact.json'), b'wb') as f:
+            f.write(json.dumps(self.client_group_contact, indent=4))
+
+    def web_wx_get_group_tmp_contact(self):
+        """
+        批量获取扩展联系方式（适用获取群聊、临时群组成员信息）
+        :return:
+        """
+        url = self.base_uri + '/webwxbatchgetcontact?type=ex&r=%s&pass_ticket=%s' % (self._get_tc(), self.pass_ticket)
+        # print(url)
+        request_headers = self.headers
+        request_headers.update({'Content-Type': 'application/json;charset=utf-8'})
+
+        self.client_group_tmp_contact = {}
+
+        for group_info in self.client_info['ContactList']:
+
+            if not group_info['UserName'].startswith('@@') or not group_info['MemberList']:
+                continue
+            member_list = group_info['MemberList']
+            if len(member_list) <= 50:
+                group_list = [{'UserName': member['UserName'], 'EncryChatRoomId': group_info['UserName']} for member in
+                              member_list]
+
+                payload = {
+                    'BaseRequest': {
+                        'Uin': self.wxuin,
+                        'Sid': self.wxsid,
+                        'Skey': self.skey,
+                        'DeviceID': self.device_id,
+                    },
+                    'Count': len(group_list),
+                    'List': group_list
+                }
+                self.client_group_tmp_contact[group_info['UserName']] = json.loads(
+                    self.s.post(url, json=payload, headers=request_headers, timeout=REQUESTS_TIME_OUT).content)
+            else:
+                c = 0
+                while 1:
+                    if c * 50 > len(member_list):
+                        break
+                    list_start = c * 50
+                    c += 1
+                    list_end = c * 50
+                    group_list = [{'UserName': member['UserName'], 'EncryChatRoomId': group_info['UserName']} for member
+                                  in
+                                  member_list[list_start:list_end]]
+
+                    payload = {
+                        'BaseRequest': {
+                            'Uin': self.wxuin,
+                            'Sid': self.wxsid,
+                            'Skey': self.skey,
+                            'DeviceID': self.device_id,
+                        },
+                        'Count': len(group_list),
+                        'List': group_list
+                    }
+                    result = json.loads(
+                        self.s.post(url, json=payload, headers=request_headers, timeout=REQUESTS_TIME_OUT).content)
+                    if group_info['UserName'] not in self.client_group_tmp_contact:
+                        self.client_group_tmp_contact[group_info['UserName']] = result
+                    else:
+                        self.client_group_tmp_contact[group_info['UserName']]['Count'] += result['Count']
+                        self.client_group_tmp_contact[group_info['UserName']]['ContactList'].extend(result['ContactList'])
+
+        # print('web_wx_get_group_tmp_contact')
+        # print(json.dumps(self.client_group_tmp_contact, indent=4, ensure_ascii=False))
+        with open(os.path.join(BASE_DIR, 'contacts/client_group_tmp_contact.json'), b'wb') as f:
+            f.write(json.dumps(self.client_group_tmp_contact, indent=4))
 
     def sync_check(self):
         """
@@ -436,11 +510,15 @@ class WXClient(object):
             from_user_name = msg['FromUserName']
             to_user_name = msg['ToUserName']
             msg_type = msg['MsgType']
+            status = msg['Status']
             content = html_parser.unescape(msg['Content'])
             create_time = msg['CreateTime']
             # new_msg_id = msg['NewMsgId']
             status_notify_code = msg['StatusNotifyCode']
-            # print(msg)
+
+            # debug 模式支持消息调试
+            if self.debug:
+                print(msg)  # debug
 
             # 消息类型
             msg_type_map = {
@@ -687,55 +765,71 @@ class WXClient(object):
                     ]
                     print_info(contents, '状态通知')
 
-            # 红包消息
+            # 通知消息
             elif msg_type == 10000:
                 # print(msg)
+                if status == 3:
+                    # 红包通知
+                    # 群组消息 - 接收
+                    if from_user_name.startswith('@@') and ':<br/>' in content:
+                        to_user_name = content.split(':<br/>', 1)[0]
+                        group_info, member_info = self.get_group_member(from_user_name, to_user_name)
+                        contents = [
+                            format_info('消息编号', msg_id),
+                            format_info('消息类型', '红包'),
+                            format_info('消息来源', group_info),
+                            format_info('消息来自', member_info),
+                            format_info('消息内容', '收到红包，请在手机上查看'),
+                            format_info('消息时间', self._format_time(create_time)),
+                        ]
+                        print_info(contents, '群组消息 - 接收')
 
-                # 群组消息 - 接收
-                if from_user_name.startswith('@@') and ':<br/>' in content:
-                    to_user_name = content.split(':<br/>', 1)[0]
-                    group_info, member_info = self.get_group_member(from_user_name, to_user_name)
-                    contents = [
-                        format_info('消息编号', msg_id),
-                        format_info('消息类型', '红包'),
-                        format_info('消息来源', group_info),
-                        format_info('消息来自', member_info),
-                        format_info('消息内容', '收到红包，请在手机上查看'),
-                        format_info('消息时间', self._format_time(create_time)),
-                    ]
-                    print_info(contents, '群组消息 - 接收')
+                    # 群组消息 - 发送
+                    elif to_user_name.startswith('@@'):
+                        # print(to_user_name, from_user_name)
+                        group_info, member_info = self.get_group_member(to_user_name, from_user_name)
+                        contents = [
+                            format_info('消息编号', msg_id),
+                            format_info('消息类型', '红包'),
+                            format_info('消息来源', group_info),
+                            format_info('消息来自', member_info),
+                            format_info('消息内容', '发送红包，请在手机上查看'),
+                            format_info('消息时间', self._format_time(create_time)),
+                        ]
+                        print_info(contents, '群组消息 - 发送')
 
-                # 群组消息 - 发送
-                elif to_user_name.startswith('@@'):
-                    # print(to_user_name, from_user_name)
-                    group_info, member_info = self.get_group_member(to_user_name, from_user_name)
-                    contents = [
-                        format_info('消息编号', msg_id),
-                        format_info('消息类型', '红包'),
-                        format_info('消息来源', group_info),
-                        format_info('消息来自', member_info),
-                        format_info('消息内容', '发送红包，请在手机上查看'),
-                        format_info('消息时间', self._format_time(create_time)),
-                    ]
-                    print_info(contents, '群组消息 - 发送')
+                    # 个人消息
+                    else:
+                        from_user_name_info = self.get_contact_member(from_user_name)
+                        to_user_name_info = self.get_contact_member(to_user_name)
 
-                # 个人消息
-                else:
-                    from_user_name_info = self.get_contact_member(from_user_name)
-                    to_user_name_info = self.get_contact_member(to_user_name)
+                        status_msg = '接收' if self.client_info['User']['NickName'] == to_user_name_info else '发送'
 
-                    status_msg = '接收' if self.client_info['User']['NickName'] == to_user_name_info else '发送'
+                        contents = [
+                            format_info('消息编号', msg_id),
+                            format_info('消息类型', '红包'),
+                            format_info('消息来自', from_user_name_info),
+                            format_info('消息发至', to_user_name_info),
+                            format_info('消息内容', '%s红包，请在手机上查看' % status_msg),
+                            format_info('消息时间', self._format_time(create_time)),
+                        ]
 
-                    contents = [
-                        format_info('消息编号', msg_id),
-                        format_info('消息类型', '红包'),
-                        format_info('消息来自', from_user_name_info),
-                        format_info('消息发至', to_user_name_info),
-                        format_info('消息内容', '%s红包，请在手机上查看' % status_msg),
-                        format_info('消息时间', self._format_time(create_time)),
-                    ]
+                        print_info(contents, '个人消息 - %s' % status_msg)
 
-                    print_info(contents, '个人消息 - %s' % status_msg)
+                if status == 4:
+                    # 邀请通知
+                    # 群组消息 - 邀请通知
+                    if from_user_name.startswith('@@'):
+                        group_info, member_info = self.get_group_member(from_user_name, to_user_name)
+                        contents = [
+                            format_info('消息编号', msg_id),
+                            format_info('消息类型', '邀请通知'),
+                            format_info('消息来源', group_info),
+                            format_info('消息来自', member_info),
+                            format_info('消息内容', content),
+                            format_info('消息时间', self._format_time(create_time)),
+                        ]
+                        print_info(contents, '群组消息 - 邀请通知')
 
             # 撤回消息
             elif msg_type == 10002:
@@ -802,21 +896,36 @@ class WXClient(object):
         :param member_code:
         :return:
         """
+        # 获取群组成员
         for group_item in self.client_group_contact['ContactList']:
-            # print(group_item['UserName'], group_item['NickName'], group_item['DisplayName'])
             if group_code == group_item['UserName']:
                 group_nick_name = group_item['NickName']
                 group_display_name = group_item['DisplayName']
-                group_info = '%s [%s]' % (
-                    group_nick_name, group_display_name) if group_display_name else group_nick_name
+                group_info = group_nick_name
+                if group_display_name:
+                    group_info = '%s [%s]' % (group_nick_name, group_display_name)
 
                 for member_item in group_item['MemberList']:
-                    # print(member_item['UserName'], type(member_item['UserName']))
                     if member_code == member_item['UserName']:
                         member_nick_name = member_item['NickName']
                         member_display_name = member_item['DisplayName']
-                        member_info = '%s [%s]' % (
-                            member_nick_name, member_display_name) if member_display_name else member_nick_name
+                        member_info = member_nick_name
+                        if member_display_name:
+                            member_info = '%s [%s]' % (member_nick_name, member_display_name)
+                        return group_info, member_info
+        # 获取群聊成员
+        for group_item in self.client_info['ContactList']:
+            if group_code == group_item['UserName']:
+                group_nick_name = group_item['NickName']
+                group_display_name = group_item['DisplayName']
+                group_info = group_nick_name
+                if group_display_name:
+                    group_info = '%s [%s]' % (group_nick_name, group_display_name)
+
+                for member_item in self.client_group_tmp_contact.get(group_code, {}).get('ContactList', []):
+                    if member_code == member_item['UserName']:
+                        member_nick_name = member_item['NickName']
+                        member_info = member_nick_name
                         return group_info, member_info
         return '-', '-'
 
@@ -855,8 +964,9 @@ class WXClient(object):
         self.web_wx_init()
         self.web_wx_status_notify()
 
-        self.web_wx_get_contact()
-        self.web_wx_batch_get_contact()
+        self.web_wx_get_contact()               # 获取好友信息
+        self.web_wx_get_group_contact()         # 获取群组成员
+        self.web_wx_get_group_tmp_contact()     # 获取群聊成员
 
         self.show_login_user_info()
         self.show_gh_info()
